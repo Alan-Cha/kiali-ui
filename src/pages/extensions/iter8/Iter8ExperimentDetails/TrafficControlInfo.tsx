@@ -1,10 +1,9 @@
 import * as React from 'react';
 import { TrafficControl } from '../../../../types/Iter8';
-import { Table, TableBody, TableHeader, IRow, ICell, cellWidth } from '@patternfly/react-table';
+import { Table, TableBody, TableHeader, TableVariant, compoundExpand, IRow } from '@patternfly/react-table';
 import { EmptyState, EmptyStateBody, EmptyStateVariant, Title } from '@patternfly/react-core';
-import { css } from '@patternfly/react-styles';
-import styles from '@patternfly/react-styles/css/components/Table/table';
 import equal from 'fast-deep-equal';
+import CodeBranchIcon from '@patternfly/react-icons/dist/js/icons/code-branch-icon';
 
 interface TrafficControlInfoProps {
   trafficControl: TrafficControl;
@@ -13,6 +12,7 @@ interface TrafficControlInfoProps {
 type State = {
   matchRuleExpanded: string[];
   columns: any;
+  childColumns: any;
   rows: any;
   isUpdated: boolean;
 };
@@ -23,15 +23,18 @@ class TrafficControlInfo extends React.Component<TrafficControlInfoProps, State>
     this.state = {
       matchRuleExpanded: [],
       columns: [
-        {
-          title: ''
-        },
         'URL Match Policy',
-        'Match String'
+        'Match String',
+        {
+          title: 'Headers',
+          cellTransforms: [compoundExpand]
+        }
       ],
+      childColumns: ['Header Key', 'Match Policy', 'Match String'],
       rows: this.getRows(),
       isUpdated: false
     };
+    this.onExpand = this.onExpand.bind(this);
   }
 
   componentDidUpdate(prevProps) {
@@ -46,89 +49,76 @@ class TrafficControlInfo extends React.Component<TrafficControlInfoProps, State>
 
   getRows = (): IRow[] => {
     let rows: IRow[] = [];
-
+    let parentCount = 0;
     this.props.trafficControl?.match.http?.map(matchRule => {
       const childRows: IRow[] = matchRule.headers.map(h => {
         return {
-          cells: [{}, { title: <>{h.key}</> }, { title: <>{h.match}</> }, { title: <>{h.stringMatch}</> }]
+          isOpen: false,
+          cells: [{ title: <>{h.key}</> }, { title: <>{h.match}</> }, { title: <>{h.stringMatch}</> }]
         };
       });
 
-      let number = rows.push({
-        isOpen: false,
-        cells: [{ title: <> </> }, { title: <> {matchRule.uri.match}</> }, { title: <> {matchRule.uri.stringMatch}</> }]
-      });
-
       rows.push({
-        parent: number - 1,
-        fullWidth: true,
         cells: [
-          <>
-            <Table aria-label="Simple Table" cells={this.columns()} rows={childRows}>
-              <TableHeader />
-              <TableBody />
-            </Table>
-          </>
+          { title: <> {matchRule.uri.match}</>, props: { component: 'th' } },
+          { title: <> {matchRule.uri.stringMatch}</>, props: { component: 'th' } },
+          {
+            title: (
+              <React.Fragment>
+                <CodeBranchIcon key="icon" /> {matchRule.headers.length}
+              </React.Fragment>
+            ),
+            props: { isOpen: false, ariaControls: 'childTable' + parentCount }
+          }
         ]
       });
-      return rows;
+      rows.push({
+        isOpen: false,
+        parent: parentCount,
+        compoundParent: 2,
+        cells: [
+          {
+            title: (
+              <Table
+                cells={this.state.childColumns}
+                variant={TableVariant.compact}
+                rows={childRows}
+                className="pf-m-no-border-rows"
+              >
+                <TableHeader />
+                <TableBody />
+              </Table>
+            ),
+            props: { isOpen: false, className: 'pf-m-no-padding', colSpan: 3 }
+          }
+        ]
+      });
+      parentCount = 2 + parentCount;
     });
     return rows;
   };
 
-  columns = (): ICell[] => {
-    return [
-      { title: '', transforms: [cellWidth(20) as any] },
-      { title: 'Header Key', transforms: [cellWidth(25) as any] },
-      { title: 'Match Policy', transforms: [cellWidth(25) as any] },
-      { title: 'Match String' }
-    ];
-  };
-
-  onCollapse = (_, rowKey, isOpen) => {
+  onExpand(_, rowIndex, colIndex, isOpen) {
     const { rows } = this.state;
-    /**
-     * Please do not use rowKey as row index for more complex tables.
-     * Rather use some kind of identifier like ID passed with each row.
-     */
-    rows[rowKey].isOpen = isOpen;
+    if (!isOpen) {
+      // set all other expanded cells false in this row if we are expanding
+      rows[rowIndex].cells.forEach(cell => {
+        if (cell.props) cell.props.isOpen = false;
+      });
+      rows[rowIndex].cells[colIndex].props.isOpen = true;
+      rows[rowIndex].isOpen = true;
+    } else {
+      rows[rowIndex].cells[colIndex].props.isOpen = false;
+      rows[rowIndex].isOpen = rows[rowIndex].cells.some(cell => cell.props && cell.props.isOpen);
+    }
     this.setState({
       rows
     });
-  };
-
-  customRowWrapper = ({ trRef, className, rowProps, row: { isExpanded, isHeightAuto }, ...props }) => {
-    const dangerErrorStyle = {
-      borderLeft: '3px solid var(--pf-global--primary-color--100)'
-    };
-
-    return (
-      <tr
-        {...props}
-        ref={trRef}
-        className={css(
-          className,
-          'custom-static-class',
-          isExpanded !== undefined && styles.tableExpandableRow,
-          isExpanded && styles.modifiers.expanded,
-          isHeightAuto && styles.modifiers.heightAuto
-        )}
-        hidden={isExpanded !== undefined && !isExpanded}
-        style={dangerErrorStyle}
-      />
-    );
-  };
-
+  }
   render() {
     const { columns, rows } = this.state;
     return (
-      <Table
-        aria-label="SpanTable"
-        className={'spanTracingTagsTable'}
-        onCollapse={this.onCollapse}
-        rows={rows}
-        cells={columns}
-      >
+      <Table aria-label="Compound expandable table" onExpand={this.onExpand} rows={rows} cells={columns}>
         <TableHeader />
         {rows.length > 0 ? (
           <TableBody />
